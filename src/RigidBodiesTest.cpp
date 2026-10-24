@@ -24,7 +24,7 @@ namespace
 	bool IsRigid(int type)
 	{
 		return type == PT_RIGD || type == PT_RWOD || type == PT_RRBR || type == PT_RICE ||
-			type == PT_RSTN || type == PT_RFOM || type == PT_RGLD;
+			type == PT_RSTN || type == PT_RFOM || type == PT_RGLD || type == PT_ELAS || type == PT_PELA;
 	}
 
 	struct Bounds
@@ -134,7 +134,7 @@ namespace
 			return top;
 		}
 
-		void Circle(int cx, int cy, int r)
+		void Circle(int cx, int cy, int r, int type = PT_RIGD)
 		{
 			for (int y = cy - r; y <= cy + r; y++)
 			{
@@ -142,7 +142,7 @@ namespace
 				{
 					if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r && !sim->pmap[y][x])
 					{
-						sim->create_part(-1, x, y, PT_RIGD);
+						sim->create_part(-1, x, y, type);
 					}
 				}
 			}
@@ -795,6 +795,316 @@ namespace
 			}
 			Expect(ground - 1 - peak[0] > 15, "rubber barely bounced: " + std::to_string(ground - 1 - peak[0]) + " px");
 			Expect(ground - 1 - peak[0] > 3 * std::max(0, ground - 1 - peak[1]), "rubber bounced " + std::to_string(ground - 1 - peak[0]) + " px, stone " + std::to_string(ground - 1 - peak[1]));
+		} },
+		{ "ELAS bounces back as high as it fell, every time", [](Scene &s) {
+			s.sim->rigidBodies->airResistance = false;
+			s.Solid(20, ground, 590, ground + 5);
+			s.Rigid(150, 140, 16, 16, PT_ELAS);
+			auto drop = ground - 1 - s.Of().y1;
+			// The height of the top of each bounce, for five bounces.
+			std::vector<int> peaks;
+			int last = s.Of().y1;
+			bool rising = false;
+			for (int f = 0; f < 1500 && peaks.size() < 5; f++)
+			{
+				s.Run(1);
+				auto y = s.Of().y1;
+				if (y < last)
+				{
+					rising = true;
+				}
+				else if (y > last && rising)
+				{
+					peaks.push_back(ground - 1 - last);
+					rising = false;
+				}
+				last = y;
+			}
+			std::string report = "dropped from " + std::to_string(drop) + " px, bounced to";
+			for (auto peak : peaks)
+			{
+				report += " " + std::to_string(peak);
+			}
+			Expect(peaks.size() == 5, "expected 5 bounces: " + report);
+			for (auto peak : peaks)
+			{
+				Expect(peak >= drop * 0.95f, "lost height: " + report);
+				Expect(peak <= drop * 1.05f, "gained height: " + report);
+			}
+		} },
+		{ "spinning ELAS balls hit at any speed knock each other apart", [](Scene &s) {
+			// As drawn in the game: balls of radius 23 and 4, both spinning,
+			// no gravity. The big one is sent at the small one at different
+			// speeds; it used to stop dead when it got inside the small one
+			// before Box2D noticed them touching.
+			std::string report;
+			bool ok = true;
+			for (auto speed : { 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f })
+			{
+				Scene scene;
+				scene.sim->gravityMode = GRAV_OFF;
+				scene.sim->rigidBodies->airResistance = false;
+				scene.Circle(100, 190, 23, PT_ELAS);
+				scene.Circle(165, 190, 4, PT_ELAS);
+				scene.Run(2);
+				auto &rb = *scene.sim->rigidBodies;
+				// Spin both (equal and opposite shoves above and below the
+				// middle), then send the big one off to the right.
+				auto spin = [&](int x, int y, int r, float speed) {
+					std::vector<std::pair<int, int>> top{ { x, y - r + 1 } }, bottom{ { x, y + r - 1 } };
+					rb.Push(*scene.sim, top, { float(x), float(y - r + 1) }, { speed, 0.0f });
+					rb.Push(*scene.sim, bottom, { float(x), float(y + r - 1) }, { -speed, 0.0f });
+				};
+				spin(100, 190, 23, 0.5f);
+				spin(165, 190, 4, 0.5f);
+				std::vector<std::pair<int, int>> middle{ { 100, 190 } };
+				rb.Push(*scene.sim, middle, { 100.0f, 190.0f }, { speed, 0.0f });
+				auto smallStart = scene.Of(150, 0, XRES, YRES).x0;
+				int smallFurthest = smallStart;
+				for (int f = 0; f < 90; f++)
+				{
+					scene.Run(1);
+					for (auto &[id, b] : scene.Bodies())
+					{
+						if (b.count < 100)
+						{
+							smallFurthest = std::max(smallFurthest, b.x0);
+						}
+					}
+				}
+				auto moved = smallFurthest - smallStart;
+				report += " speed " + std::to_string(int(speed)) + ": " + std::to_string(moved) + " px;";
+				ok &= moved > 40;
+			}
+			Expect(ok, "the small ball should be knocked well away every time:" + report);
+		} },
+		{ "with looping edges, a body rolls off one side and back in the other", [](Scene &s) {
+			s.sim->SetEdgeMode(EDGE_LOOP);
+			s.sim->rigidBodies->airResistance = false;
+			s.Solid(CELL, ground, XRES - CELL - 1, ground + 5);
+			s.Circle(500, ground - 9, 8, PT_RRBR);
+			s.Run(10);
+			auto count = s.Count();
+			std::vector<std::pair<int, int>> cells{ { 500, ground - 9 } };
+			s.sim->rigidBodies->Push(*s.sim, cells, { 500, float(ground - 9) }, { 6.0f, 0.0f });
+			// A ball rolling to the right: it should go off the right edge,
+			// come back in on the left and carry on along the floor.
+			bool straddled = false, cameBack = false;
+			for (int f = 0; f < 120; f++)
+			{
+				s.Run(1);
+				auto b = s.Of();
+				straddled |= b.x1 - b.x0 > XRES / 2;
+				cameBack |= b.x1 - b.x0 < 30 && b.x1 < XRES / 2;
+				Expect(s.Count() == count, "lost pixels at frame " + std::to_string(f));
+			}
+			auto b = s.Of();
+			Expect(straddled && cameBack, "didn't come back in on the other side: " + Describe(b));
+			Expect(b.Width() < 30 && s.Bodies().size() == 1, "should be back in one piece: " + Describe(b));
+			auto [pos, vel] = s.sim->rigidBodies->PoseOf(s.Bodies().begin()->first);
+			Expect(vel.x > 0.0f, "should still be rolling to the right: " + std::to_string(vel.x / 60) + " px/frame");
+		} },
+		{ "with looping edges, a body and a grain fall off the bottom and back in at the top", [](Scene &s) {
+			s.sim->SetEdgeMode(EDGE_LOOP);
+			s.sim->rigidBodies->airResistance = false;
+			s.Rigid(200, 300, 12, 12, PT_RSTN);
+			s.sim->create_part(-1, 400, 300, PT_RSTN);
+			auto count = s.Count();
+			bool bodyBack = false, grainBack = false;
+			for (int f = 0; f < 120; f++)
+			{
+				s.Run(1);
+				auto body = s.Of(150, 0, 250, YRES), grain = s.Of(350, 0, 450, YRES);
+				bodyBack |= body.Height() < 20 && body.y1 < YRES / 2;
+				grainBack |= grain.count == 1 && grain.y0 < YRES / 2;
+				Expect(s.Count() == count, "lost pixels at frame " + std::to_string(f));
+			}
+			Expect(bodyBack, "the body didn't come back in at the top: " + Describe(s.Of(150, 0, 250, YRES)));
+			Expect(grainBack, "the grain didn't come back in at the top: " + Describe(s.Of(350, 0, 450, YRES)));
+		} },
+		{ "PELA slides along the floor without slowing down", [](Scene &s) {
+			s.sim->rigidBodies->airResistance = false;
+			s.Solid(20, ground, 590, ground + 5);
+			s.Rigid(60, ground - 12, 16, 12, PT_PELA);
+			s.Run(10);
+			std::vector<std::pair<int, int>> cells{ { 68, ground - 6 } };
+			s.sim->rigidBodies->Push(*s.sim, cells, { 68, float(ground - 6) }, { 5.0f, 0.0f });
+			s.Run(1);
+			auto id = s.Bodies().begin()->first;
+			auto start = s.sim->rigidBodies->PoseOf(id).second.x;
+			s.Run(60);
+			auto end = s.sim->rigidBodies->PoseOf(id).second.x;
+			Expect(start > 0.0f && end > start * 0.98f, "slowed from " + std::to_string(start / 60) + " to " + std::to_string(end / 60) + " px/frame");
+		} },
+		{ "PELA bounces back as high as it fell", [](Scene &s) {
+			s.sim->rigidBodies->airResistance = false;
+			s.Solid(20, ground, 590, ground + 5);
+			s.Circle(300, 150, 8, PT_PELA);
+			auto drop = ground - 1 - s.Of().y1;
+			std::vector<int> peaks;
+			int last = s.Of().y1;
+			bool rising = false;
+			for (int f = 0; f < 1500 && peaks.size() < 5; f++)
+			{
+				s.Run(1);
+				auto y = s.Of().y1;
+				if (y < last)
+				{
+					rising = true;
+				}
+				else if (y > last && rising)
+				{
+					peaks.push_back(ground - 1 - last);
+					rising = false;
+				}
+				last = y;
+			}
+			std::string report = "dropped from " + std::to_string(drop) + " px, bounced to";
+			for (auto peak : peaks)
+			{
+				report += " " + std::to_string(peak);
+			}
+			Expect(peaks.size() == 5, "expected 5 bounces: " + report);
+			for (auto peak : peaks)
+			{
+				Expect(peak >= drop * 0.95f && peak <= drop * 1.05f, "should bounce back as high as it fell: " + report);
+			}
+		} },
+		{ "a hard, spinning PELA ball hits the one it's aimed at", [](Scene &s) {
+			// As set up in the game: two balls of radius 23, no gravity. One is
+			// pushed hard at the other with a line from off its middle, which
+			// also sets it spinning fast. It used to stop a few pixels short,
+			// spinning, without ever touching the other.
+			std::string report;
+			bool ok = true;
+			for (auto offset : { 0, 6, 12, 18, 23, 28, 34, 40, -23, -34 })
+			{
+				Scene scene;
+				scene.sim->gravityMode = GRAV_OFF;
+				scene.sim->rigidBodies->airResistance = false;
+				scene.Circle(215, 160, 23, PT_PELA);
+				scene.Circle(287, 305, 23, PT_PELA);
+				scene.Run(2);
+				auto &rb = *scene.sim->rigidBodies;
+				// Towards the other ball, from a point to one side of the
+				// middle (across the direction of the push).
+				b2Vec2 dir = b2Normalize(b2Vec2{ 215.0f - 287.0f, 160.0f - 305.0f });
+				b2Vec2 at{ 287.0f - dir.y * float(offset), 305.0f + dir.x * float(offset) };
+				// Everything under a brush as big as the ball.
+				std::vector<std::pair<int, int>> cells;
+				for (int dy = -23; dy <= 23; dy++)
+				{
+					for (int dx = -23; dx <= 23; dx++)
+					{
+						if (dx * dx + dy * dy <= 23 * 23)
+						{
+							cells.emplace_back(int(at.x) + dx, int(at.y) + dy);
+						}
+					}
+				}
+				rb.Push(*scene.sim, cells, at, b2MulSV(0.15f * 200.0f, dir));
+				int aimedId = 0;
+				for (auto &[id, b] : scene.Bodies())
+				{
+					if (b.y0 < 200)
+					{
+						aimedId = id;
+					}
+				}
+				auto aimed = scene.Bodies().at(aimedId);
+				int moved = 0;
+				for (int f = 0; f < 120; f++)
+				{
+					scene.Run(1);
+					auto bodies = scene.Bodies();
+					Expect(bodies.count(aimedId), "the ball aimed at stopped being one body");
+					auto &b = bodies.at(aimedId);
+					moved = std::max(moved, int(std::hypot(float(b.x0 - aimed.x0), float(b.y0 - aimed.y0))));
+				}
+				report += " offset " + std::to_string(offset) + ": " + std::to_string(moved) + " px, stuck " + std::to_string(rb.timings.stuck) + ", pulled back " + std::to_string(rb.timings.pulled) + ";";
+				ok &= moved > 40;
+			}
+			Expect(ok, "the ball aimed at should be knocked away every time:" + report);
+		} },
+		{ "the GRAB tool drags a body around and throws it", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			s.Rigid(100, ground - 20, 20, 20, PT_RWOD);
+			s.Run(10);
+			auto &rb = *s.sim->rigidBodies;
+			std::vector<std::pair<int, int>> cells{ { 110, ground - 10 } };
+			Expect(rb.Grab(*s.sim, cells, { 110, float(ground - 10) }), "didn't take hold");
+			// The cursor moves up and to the right over a second, then stays.
+			b2Vec2 target{ 110, float(ground - 10) };
+			for (int f = 0; f < 90; f++)
+			{
+				if (f < 60)
+				{
+					target = { 110.0f + 3.0f * float(f + 1), float(ground - 10) - 2.0f * float(f + 1) };
+				}
+				rb.MoveGrab(target);
+				s.Run(1);
+			}
+			auto b = s.Of();
+			auto held = b2Vec2{ (b.x0 + b.x1) * 0.5f, (b.y0 + b.y1) * 0.5f };
+			Expect(b2Distance(held, target) < 6.0f, "should be held at the cursor: " + Describe(b));
+			// A quick flick to the right, then let go: it should fly on.
+			for (int f = 0; f < 5; f++)
+			{
+				target.x += 6.0f;
+				rb.MoveGrab(target);
+				s.Run(1);
+			}
+			rb.Release();
+			auto let = s.Of().x0;
+			s.Run(10);
+			Expect(s.Of().x0 > let + 15, "should keep moving after being let go: " + std::to_string(s.Of().x0 - let) + " px");
+		} },
+		{ "a body dragged with GRAB still can't go through a wall", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			s.Solid(200, ground - 60, 205, ground - 1);
+			s.Rigid(150, ground - 20, 20, 20, PT_RSTN);
+			s.Run(10);
+			auto &rb = *s.sim->rigidBodies;
+			std::vector<std::pair<int, int>> cells{ { 160, ground - 10 } };
+			Expect(rb.Grab(*s.sim, cells, { 160, float(ground - 10) }), "didn't take hold");
+			for (int f = 0; f < 90; f++)
+			{
+				rb.MoveGrab({ 260, float(ground - 10) });
+				s.Run(1);
+				Expect(s.Of().x1 < 200, "went into the wall: " + Describe(s.Of()));
+			}
+			Expect(s.Of().x1 > 190, "should be pulled up against the wall: " + Describe(s.Of()));
+		} },
+		{ "a GRAB hold that isn't moved lets go by itself", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			s.Rigid(100, ground - 20, 20, 20, PT_RWOD);
+			s.Run(10);
+			auto &rb = *s.sim->rigidBodies;
+			std::vector<std::pair<int, int>> cells{ { 110, ground - 10 } };
+			rb.Grab(*s.sim, cells, { 110, float(ground - 10) });
+			for (int f = 0; f < 30; f++)
+			{
+				rb.MoveGrab({ 110, 200 });
+				s.Run(1);
+			}
+			Expect(s.Of().y1 < ground - 60, "should have been lifted: " + Describe(s.Of()));
+			// The mouse button let go of somewhere the tool didn't hear about.
+			s.Run(120);
+			Expect(s.Of().y1 == ground - 1, "should have dropped back to the floor: " + Describe(s.Of()));
+		} },
+		{ "with air resistance off, foam falls as fast as anything", [](Scene &s) {
+			// Two scenes, one with air resistance and one without.
+			Scene still;
+			still.sim->rigidBodies->airResistance = false;
+			for (auto *scene : { &s, &still })
+			{
+				scene->Solid(20, ground, 590, ground + 5);
+				scene->Rigid(150, 40, 20, 20, PT_RFOM);
+			}
+			s.Run(40);
+			still.Run(40);
+			auto fell = s.Of().y0 - 40, fellStill = still.Of().y0 - 40;
+			Expect(fellStill > fell + 20, "with air resistance foam fell " + std::to_string(fell) + " px, without " + std::to_string(fellStill) + " px");
 		} },
 		{ "pushed sideways, ice slides far and rubber grips", [](Scene &s) {
 			s.sim->legacy_enable = 1;

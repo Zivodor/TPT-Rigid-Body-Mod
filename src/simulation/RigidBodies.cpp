@@ -5,6 +5,7 @@
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <climits>
+#include <limits>
 #include <optional>
 #include <chrono>
 #include <cmath>
@@ -20,6 +21,13 @@ namespace
 	constexpr float gravityPerFrame = 0.2f;
 	constexpr float gravityScale = gravityPerFrame * frameRate * frameRate;
 	constexpr float maxSpeed = 10.0f * frameRate;
+	// How the GRAB tool's hold pulls a body: a spring this stiff and this
+	// damped, up to this many times the body's weight, and let go of when
+	// it hasn't been moved for this many frames.
+	constexpr float grabHertz = 6.0f;
+	constexpr float grabDamping = 0.7f;
+	constexpr float grabStrength = 200.0f;
+	constexpr int grabTimeout = 10;
 	constexpr float terrainFriction = 0.6f;
 	// Fewer pixels than this aren't a rigid body but loose grains.
 	constexpr int minBodyPixels = 2;
@@ -52,6 +60,9 @@ namespace
 	// A body whose pixels could not be placed is pulled back to where they
 	// are once Box2D has taken it further than this from them.
 	constexpr float maxDrift = 2.0f;
+	// Unless only other bodies stopped it, which Box2D sorts out itself, up
+	// to this far.
+	constexpr float maxBodyOverlap = 12.0f;
 	// Pixels that may be moved aside when placing a body, and how many
 	// cells may be searched to find each one a free spot.
 	constexpr int maxDisplaced = 3;
@@ -96,6 +107,8 @@ namespace
 		{ PT_RSTN,  2.6f, 0.9f,  0.05f }, // stone
 		{ PT_RFOM,  0.1f, 0.7f,  0.3f  }, // foam
 		{ PT_RGLD, 19.3f, 0.5f,  0.05f }, // gold
+		{ PT_ELAS,  1.1f, 1.2f,  1.0f  }, // elastic: bounces back as high as it fell
+		{ PT_PELA,  1.1f, 0.0f,  1.0f  }, // perfect elastic: frictionless, nothing slows it
 	};
 
 	const Material *MaterialOf(int type)
@@ -113,6 +126,46 @@ namespace
 	// The material of a rigid pixel (including a sparked one), or 0.
 	// Lone pixels, moving like powder rather than as bodies, have this tag.
 	constexpr int grainTag = INT_MIN;
+
+	// With looping edges, the cell that one off an edge comes back in at;
+	// otherwise the cell itself.
+	void WrapCell(const Simulation &sim, int &x, int &y)
+	{
+		if (sim.edgeMode != EDGE_LOOP)
+		{
+			return;
+		}
+		constexpr int w = XRES - 2 * CELL, h = YRES - 2 * CELL;
+		x = CELL + ((x - CELL) % w + w) % w;
+		y = CELL + ((y - CELL) % h + h) % h;
+	}
+
+	// Does a body reach across a looping edge, its pixels partly on each
+	// side of the screen?
+	template<class Pixels>
+	bool Straddles(const Simulation &sim, const Pixels &pixels)
+	{
+		if (sim.edgeMode != EDGE_LOOP)
+		{
+			return false;
+		}
+		int x0 = XRES, y0 = YRES, x1 = -1, y1 = -1;
+		for (auto &p : pixels)
+		{
+			x0 = std::min(x0, p.wx);
+			y0 = std::min(y0, p.wy);
+			x1 = std::max(x1, p.wx);
+			y1 = std::max(y1, p.wy);
+		}
+		return x1 - x0 > XRES / 2 || y1 - y0 > YRES / 2;
+	}
+
+	// How close a body has to come to the terrain for them to have a
+	// contact: Box2D's own speculative distance, before the mod raised it for
+	// bodies hitting each other (see vendor/box2d/MODIFICATIONS.md). Any
+	// further ahead, a body sliding along a floor built of tiles bumps into
+	// the side of the next tile as if it were a wall.
+	constexpr float terrainSpeculative = 0.2f;
 
 	int RigidMaterial(const Particle &part)
 	{
@@ -384,6 +437,7 @@ RigidBodies::RigidBodies() : lastState(NPART, noParticle), partBody(NPART, 0), p
 	// body further than that in one step before it's slowed down.
 	worldDef.maximumLinearSpeed = maxSpeed;
 	world = b2CreateWorld(&worldDef);
+	b2World_SetPreSolveCallback(world, TerrainPreSolve, this);
 	auto terrainDef = b2DefaultBodyDef();
 	terrain = b2CreateBody(world, &terrainDef);
 }
@@ -395,6 +449,7 @@ RigidBodies::~RigidBodies()
 
 void RigidBodies::Clear()
 {
+	Release();
 	for (auto &[id, body] : bodies)
 	{
 		b2DestroyBody(body.b2);
@@ -421,6 +476,66 @@ std::pair<b2Vec2, b2Vec2> RigidBodies::PoseOf(int id) const
 		return {};
 	}
 	return { b2Body_GetPosition(it->second.b2), b2Body_GetLinearVelocity(it->second.b2) };
+}
+
+// Contacts between a body and the terrain only count when the body is about
+// to touch it (see terrainSpeculative), and not where the terrain is flat but
+// Box2D has it sloping. The terrain is built of separate tiles with their
+// corners rounded, so a flat floor dips a hair where two tiles meet; a body
+// sliding along it, sunk into it a hair, would clip the far side of the dip
+// and be thrown up (and with no friction, sent tumbling). A contact's
+// points are kept or dropped together: dropping just one of two would make
+// a body landing flat (but tilted a hair) bounce off one corner and spin.
+bool RigidBodies::TerrainPreSolve(b2ShapeId shapeA, b2ShapeId shapeB, b2Manifold *manifold, void *context)
+{
+	return static_cast<RigidBodies *>(context)->KeepTerrainContact(shapeA, shapeB, *manifold);
+}
+
+bool RigidBodies::KeepTerrainContact(b2ShapeId shapeA, b2ShapeId shapeB, b2Manifold &manifold) const
+{
+	// The direction the terrain's face points, out towards the body.
+	auto out = B2_ID_EQUALS(b2Shape_GetBody(shapeA), terrain) ? manifold.normal : b2Neg(manifold.normal);
+	bool near = false, sloping = false;
+	for (int i = 0; i < manifold.pointCount; i++)
+	{
+		auto &point = manifold.points[i];
+		near |= point.separation <= terrainSpeculative;
+		if (!stepSim)
+		{
+			continue;
+		}
+		// The terrain cell the contact is on, and which way the terrain's
+		// surface faces there if it's flat for a couple of cells either side.
+		auto inside = b2MulSub(point.point, 0.6f, out);
+		auto cx = int(std::floor(inside.x + 0.5f)), cy = int(std::floor(inside.y + 0.5f));
+		auto solid = [&](int x, int y) {
+			return TerrainSolid(*stepSim, x, y);
+		};
+		if (!solid(cx, cy))
+		{
+			continue;
+		}
+		for (auto [dx, dy] : { std::pair(0, -1), { 0, 1 }, { -1, 0 }, { 1, 0 } })
+		{
+			bool flat = !solid(cx + dx, cy + dy);
+			for (int t = -2; t <= 2 && flat; t++)
+			{
+				// Along the surface: solid, with nothing solid in front.
+				auto tx = cx + t * dy, ty = cy + t * dx;
+				flat = solid(tx, ty) && !solid(tx + dx, ty + dy);
+			}
+			if (flat && b2Dot(out, { float(dx), float(dy) }) < 0.98f)
+			{
+				sloping = true;
+			}
+		}
+	}
+	if (near && !sloping)
+	{
+		return true;
+	}
+	manifold.pointCount = 0;
+	return false;
 }
 
 std::vector<int> RigidBodies::BodiesIn(const Simulation &sim, const std::vector<std::pair<int, int>> &cells) const
@@ -469,6 +584,72 @@ void RigidBodies::Poke(const Simulation &sim, const std::vector<std::pair<int, i
 	}
 }
 
+bool RigidBodies::Grab(const Simulation &sim, const std::vector<std::pair<int, int>> &cells, b2Vec2 at)
+{
+	Release();
+	int best = 0;
+	b2Vec2 point = at;
+	auto nearest = std::numeric_limits<float>::max();
+	for (auto [x, y] : cells)
+	{
+		if (x < 0 || x >= XRES || y < 0 || y >= YRES)
+		{
+			continue;
+		}
+		auto r = sim.pmap[y][x];
+		auto id = r ? partBody[ID(r)] : 0;
+		auto distance = b2Distance({ float(x), float(y) }, at);
+		if (id && bodies.count(id) && distance < nearest)
+		{
+			nearest = distance;
+			best = id;
+			point = { float(x), float(y) };
+		}
+	}
+	if (!best)
+	{
+		return false;
+	}
+	auto &body = bodies.at(best);
+	auto def = b2DefaultMouseJointDef();
+	def.bodyIdA = terrain;
+	def.bodyIdB = body.b2;
+	def.target = point;
+	def.hertz = grabHertz;
+	def.dampingRatio = grabDamping;
+	def.maxForce = grabStrength * b2Body_GetMass(body.b2) * gravityScale;
+	grabJoint = b2CreateMouseJoint(world, &def);
+	grabbed = best;
+	grabFrame = frame;
+	b2Body_SetAwake(body.b2, true);
+	return true;
+}
+
+void RigidBodies::MoveGrab(b2Vec2 to)
+{
+	if (!grabbed || !b2Joint_IsValid(grabJoint))
+	{
+		return;
+	}
+	b2MouseJoint_SetTarget(grabJoint, to);
+	grabFrame = frame;
+	if (auto it = bodies.find(grabbed); it != bodies.end())
+	{
+		b2Body_SetAwake(it->second.b2, true);
+	}
+}
+
+void RigidBodies::Release()
+{
+	// The joint goes with the body if that was destroyed (split, melted...).
+	if (grabbed && b2Joint_IsValid(grabJoint))
+	{
+		b2DestroyJoint(grabJoint);
+	}
+	grabbed = 0;
+	grabJoint = b2_nullJointId;
+}
+
 void RigidBodies::Update(Simulation &sim)
 {
 	auto time = [](double &total, auto &&phase) {
@@ -478,6 +659,13 @@ void RigidBodies::Update(Simulation &sim)
 	};
 	frame++;
 	time(timings.gather, [&] { Gather(sim); });
+	// A body that's been rebuilt (cut, melted, added to) is a new body, and
+	// the hold goes with the old one; and the tool keeps moving a hold while
+	// the mouse button is down, so one that hasn't moved has been let go of.
+	if (grabbed && (!bodies.count(grabbed) || !b2Joint_IsValid(grabJoint) || frame - grabFrame > grabTimeout))
+	{
+		Release();
+	}
 	MoveGrains(sim);
 	if (bodies.empty())
 	{
@@ -488,7 +676,9 @@ void RigidBodies::Update(Simulation &sim)
 		ApplyGravity(sim);
 		ApplyFluidForces(sim);
 		ApplyAirForces(sim);
+		stepSim = &sim;
 		b2World_Step(world, timeStep, subSteps);
+		stepSim = nullptr;
 	});
 	time(timings.place, [&] {
 		Place(sim);
@@ -778,6 +968,7 @@ void RigidBodies::MoveGrains(Simulation &sim)
 		auto side = sim.rng.chance(1, 2) ? 1 : -1;
 		// Can the grain go into this cell, and does it swap with what's there?
 		auto into = [&](int nx, int ny, bool rising) {
+			WrapCell(sim, nx, ny);
 			if (nx < CELL || nx >= XRES - CELL || ny < CELL || ny >= YRES - CELL || sim.IsWallBlocking(nx, ny, material))
 			{
 				return false;
@@ -795,6 +986,7 @@ void RigidBodies::MoveGrains(Simulation &sim)
 			return rising ? fluid > density : fluid < density;
 		};
 		auto go = [&](int nx, int ny) {
+			WrapCell(sim, nx, ny);
 			auto r = sim.pmap[ny][nx];
 			if (r)
 			{
@@ -943,8 +1135,9 @@ bool RigidBodies::TerrainSolid(const Simulation &sim, int x, int y) const
 {
 	if (x < CELL || x >= XRES - CELL || y < CELL || y >= YRES - CELL)
 	{
-		// With void edges the engine deletes pixels that leave the screen.
-		return sim.edgeMode != EDGE_VOID;
+		// With void edges the engine deletes pixels that leave the screen,
+		// and with looping ones they come back in on the other side.
+		return sim.edgeMode == EDGE_SOLID;
 	}
 	if (sim.IsWallBlocking(x, y, PT_RIGD))
 	{
@@ -1025,6 +1218,7 @@ void RigidBodies::RefreshTerrain(Simulation &sim)
 			auto shapeDef = b2DefaultShapeDef();
 			shapeDef.material.friction = terrainFriction;
 			shapeDef.material.restitution = 0.0f;
+			shapeDef.enablePreSolveEvents = true; // see TerrainPreSolve
 			for (auto &polygon : SmoothPolygons(w, h, [&](int x, int y) { return bool(solid[y * tileSize + x]); }, float(x0), float(y0)))
 			{
 				tile.shapes.push_back(b2CreatePolygonShape(terrain, &shapeDef, &polygon));
@@ -1089,6 +1283,12 @@ void RigidBodies::ApplyFluidForces(Simulation &sim)
 	{
 		auto awake = b2Body_IsAwake(body.b2);
 		if (!awake && (frame + id) % sleepingTerrainInterval)
+		{
+			continue;
+		}
+		// Its rows would span the whole screen while it's partly on each
+		// side of a looping edge.
+		if (Straddles(sim, body.pixels))
 		{
 			continue;
 		}
@@ -1225,7 +1425,8 @@ void RigidBodies::ApplyFluidForces(Simulation &sim)
 
 // Air currents and pressure, a face of the body at a time (see airDrag).
 // Only differences in pressure across the body push it, and only air moving
-// faster than calmAirSpeed drags it, so calm air leaves it alone. A body
+// faster than calmAirSpeed drags it, so calm air leaves it alone. Air
+// resistance (still air slowing a moving body) can be switched off; a body
 // touching liquid gets its drag from that instead (see ApplyFluidForces). A
 // body asleep is only woken if the air is strong enough to matter.
 void RigidBodies::ApplyAirForces(Simulation &sim)
@@ -1292,7 +1493,7 @@ void RigidBodies::ApplyAirForces(Simulation &sim)
 				auto ay = calm(sim.vy[face.ny / CELL][face.nx / CELL], calmAirSpeed);
 				f.x += airDrag * airSpeed * ax;
 				f.y += airDrag * airSpeed * ay;
-				if (!wet)
+				if (!wet && airResistance)
 				{
 					// The face's velocity, in pixels per frame.
 					f.x -= airDrag * (v.x - w * face.arm.y) / frameRate;
@@ -1326,6 +1527,10 @@ void RigidBodies::LevelLiquids(Simulation &sim)
 	auto &elements = SimulationData::CRef().elements;
 	for (auto &[id, body] : bodies)
 	{
+		if (Straddles(sim, body.pixels))
+		{
+			continue;
+		}
 		// The body's bottom row, and how far it reaches either way: levels
 		// are compared beyond that, since a body heeled over overhangs the
 		// liquid next to its lowest point.
@@ -1708,6 +1913,7 @@ void RigidBodies::Place(Simulation &sim)
 		float fromAngle, turn;
 		int steps;
 		bool stuck = false;
+		bool byBodies = false;
 	};
 	std::vector<int> ids;
 	for (auto &[id, body] : bodies)
@@ -1721,6 +1927,22 @@ void RigidBodies::Place(Simulation &sim)
 	for (auto id : ids)
 	{
 		auto &body = bodies.at(id);
+		// With looping edges, a body whose middle has gone off one edge
+		// comes back in at the other, along with where it's drawn (its
+		// pixels wrap round as they're placed, so they don't move).
+		if (sim.edgeMode == EDGE_LOOP)
+		{
+			auto pos = b2Body_GetPosition(body.b2);
+			b2Vec2 shift{ 0.0f, 0.0f };
+			constexpr float w = XRES - 2 * CELL, h = YRES - 2 * CELL;
+			shift.x = pos.x < CELL ? w : pos.x >= XRES - CELL ? -w : 0.0f;
+			shift.y = pos.y < CELL ? h : pos.y >= YRES - CELL ? -h : 0.0f;
+			if (shift.x != 0.0f || shift.y != 0.0f)
+			{
+				b2Body_SetTransform(body.b2, b2Add(pos, shift), b2Body_GetRotation(body.b2));
+				body.drawnPos = b2Add(body.drawnPos, shift);
+			}
+		}
 		auto v = b2Body_GetLinearVelocity(body.b2);
 		if (b2Length(v) > maxSpeed)
 		{
@@ -1758,7 +1980,7 @@ void RigidBodies::Place(Simulation &sim)
 				continue;
 			}
 			auto t = float(k) / float(plan.steps);
-			targets.push_back({ plan.body, b2Lerp(plan.fromPos, plan.toPos, t), b2MakeRot(plan.fromAngle + plan.turn * t), &plan.stuck });
+			targets.push_back({ plan.body, b2Lerp(plan.fromPos, plan.toPos, t), b2MakeRot(plan.fromAngle + plan.turn * t), &plan.stuck, &plan.byBodies });
 		}
 		PlaceStep(sim, targets);
 	}
@@ -1776,6 +1998,23 @@ void RigidBodies::Place(Simulation &sim)
 		auto drift = b2Distance(pos, body.drawnPos);
 		auto turn = std::abs(b2RelativeAngle(body.drawnRot, rot));
 		auto reach = body.reach;
+		// Stopped by other bodies, it's left to Box2D: they're bodies too, so
+		// it has them overlapping and pushes them apart (a fast body can get
+		// inside another before Box2D notices them touching). Pulled back and
+		// stopped, the body would never hit the other at all. Only how far
+		// it's moved counts: one spinning fast (up to an eighth of a turn a
+		// frame) hasn't gone anywhere by turning. But it's turned back to
+		// how it's drawn, keeping its spin, if it's turned far from that:
+		// otherwise cargo stuck in a heeling ship turns away from its pixels
+		// and leaves gaps.
+		if (plan.byBodies && drift <= maxBodyOverlap)
+		{
+			if (drift + turn * reach > maxBodyOverlap)
+			{
+				b2Body_SetTransform(body.b2, pos, body.drawnRot);
+			}
+			continue;
+		}
 		if (drift + turn * reach > maxDrift)
 		{
 			// Whatever stopped it is part of the terrain by the next frame,
@@ -1839,6 +2078,7 @@ void RigidBodies::PlaceStep(Simulation &sim, const std::vector<PlaceTarget> &tar
 		b2Vec2 pos;
 		b2Rot rot;
 		bool *stuck;
+		bool *byBodies;
 		std::vector<int> target; // cells at the new pose, as x1, y1, x2, y2...
 		std::vector<int> cells;  // cells actually used
 		std::pair<int, int> up;
@@ -1850,8 +2090,12 @@ void RigidBodies::PlaceStep(Simulation &sim, const std::vector<PlaceTarget> &tar
 	for (auto &step : targets)
 	{
 		auto &body = *step.body;
-		Move move{ &body, step.pos, step.rot, step.stuck };
+		Move move{ &body, step.pos, step.rot, step.stuck, step.byBodies };
 		Place(body, step.pos, step.rot, move.target);
+		for (size_t i = 0; i < move.target.size(); i += 2)
+		{
+			WrapCell(sim, move.target[i], move.target[i + 1]);
+		}
 		bool same = true;
 		for (int n = 0; n < int(body.pixels.size()) && same; n++)
 		{
@@ -2098,6 +2342,18 @@ void RigidBodies::PlaceStep(Simulation &sim, const std::vector<PlaceTarget> &tar
 		else
 		{
 			*move.stuck = true;
+			// Was anything but other bodies in the way where Box2D put it
+			// (walls, solids, the edge)? If not, it was other bodies, even if
+			// none is in the way now: two bodies that would overlap take
+			// turns to fit, and can both end up staying where they are.
+			bool other = false;
+			for (size_t i = 0; i < move.target.size() && !other; i += 2)
+			{
+				auto x = move.target[i], y = move.target[i + 1];
+				auto r = outside(x, y) ? 0 : sim.pmap[y][x];
+				other = outside(x, y) || sim.IsWallBlocking(x, y, PT_RIGD) || (r && !partBody[ID(r)] && !IsFluid(TYP(r)));
+			}
+			*move.byBodies = !other;
 		}
 	}
 

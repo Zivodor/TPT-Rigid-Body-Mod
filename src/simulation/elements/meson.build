@@ -202,6 +202,8 @@ simulation_elem_names = [
 	'RSTN',
 	'RFOM',
 	'RGLD',
+	'ELAS',
+	'PELA',
 ]
 
 simulation_elem_src = []

@@ -25,6 +25,8 @@ public:
 	void SetWaterEqualisation(bool state);
 	bool GetRigidLiquidLevelling();
 	void SetRigidLiquidLevelling(bool state);
+	bool GetRigidAirResistance();
+	void SetRigidAirResistance(bool state);
 	bool GetShowAvatars();
 	void SetShowAvatars(bool state);
 	int GetAirMode();

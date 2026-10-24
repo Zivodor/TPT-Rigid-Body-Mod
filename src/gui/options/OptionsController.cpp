@@ -42,6 +42,11 @@ void OptionsController::SetRigidLiquidLevelling(bool state)
 	model->SetRigidLiquidLevelling(state);
 }
 
+void OptionsController::SetRigidAirResistance(bool state)
+{
+	model->SetRigidAirResistance(state);
+}
+
 void OptionsController::SetGravityMode(int gravityMode)
 {
 	model->SetGravityMode(gravityMode);

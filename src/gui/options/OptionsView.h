@@ -23,6 +23,7 @@ class OptionsView: public ui::Window
 	ui::Checkbox *newtonianGravity{};
 	ui::Checkbox *waterEqualisation{};
 	ui::Checkbox *rigidLiquidLevelling{};
+	ui::Checkbox *rigidAirResistance{};
 	ui::DropDown *airMode{};
 	ui::Textbox *ambientAirTemp{};
 	ui::Button *ambientAirTempPreview{};

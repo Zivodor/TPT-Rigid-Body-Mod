@@ -77,6 +77,17 @@ void OptionsModel::SetRigidLiquidLevelling(bool state)
 	notifySettingsChanged();
 }
 
+bool OptionsModel::GetRigidAirResistance()
+{
+	return sim->rigidBodies->airResistance;
+}
+
+void OptionsModel::SetRigidAirResistance(bool state)
+{
+	sim->rigidBodies->airResistance = state;
+	notifySettingsChanged();
+}
+
 int OptionsModel::GetAirMode()
 {
 	return sim->air->airMode;

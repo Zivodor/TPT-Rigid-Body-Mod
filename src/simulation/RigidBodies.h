@@ -9,6 +9,7 @@
 #include <vector>
 
 class Simulation;
+struct b2Manifold;
 
 // Rigid bodies made of rigid material pixels (RIGD, RWOD, RICE...), simulated
 // with Box2D.
@@ -65,6 +66,10 @@ public:
 	// stands higher on one side (see LevelLiquids). Simulation Options.
 	bool levelLiquids = true;
 
+	// Slow bodies moving through still air (see ApplyAirForces); wind and
+	// pressure push them either way. Simulation Options.
+	bool airResistance = true;
+
 	// For tests: a body's Box2D position and velocity, by body ID.
 	std::pair<b2Vec2, b2Vec2> PoseOf(int id) const;
 
@@ -74,6 +79,15 @@ public:
 	// speed (pixels per frame), whatever its size; denser ones go slower.
 	void Push(const Simulation &sim, const std::vector<std::pair<int, int>> &cells, b2Vec2 at, b2Vec2 speed);
 	void Poke(const Simulation &sim, const std::vector<std::pair<int, int>> &cells, b2Vec2 at, float speed);
+
+	// For the GRAB tool: take hold of the body with a pixel in the given
+	// cells nearest `at`, at that pixel; pull it towards wherever the hold is
+	// moved, as if by a stiff spring (it still collides with things on the
+	// way); let go of it, moving as it was, so it can be thrown. A hold that
+	// isn't moved for a few frames lets go by itself.
+	bool Grab(const Simulation &sim, const std::vector<std::pair<int, int>> &cells, b2Vec2 at);
+	void MoveGrab(b2Vec2 to);
+	void Release();
 
 private:
 	struct Pixel
@@ -141,6 +155,9 @@ private:
 	std::vector<uint32_t> sideStamp; // which side of a body each cell is on, see PlaceStep
 	std::vector<int> side;
 	uint32_t sidePass = 0;
+	int grabbed = 0; // body ID held by the GRAB tool, 0 if none
+	b2JointId grabJoint = b2_nullJointId;
+	int grabFrame = 0; // last frame the hold was moved
 	int nextBodyId = 1;
 	int frame = 0;
 
@@ -153,6 +170,9 @@ private:
 	void ApplyGravity(Simulation &sim);
 	void ApplyFluidForces(Simulation &sim);
 	void ApplyAirForces(Simulation &sim);
+	static bool TerrainPreSolve(b2ShapeId shapeA, b2ShapeId shapeB, b2Manifold *manifold, void *context);
+	bool KeepTerrainContact(b2ShapeId shapeA, b2ShapeId shapeB, b2Manifold &manifold) const;
+	const Simulation *stepSim = nullptr; // during b2World_Step, for TerrainPreSolve
 	std::vector<int> BodiesIn(const Simulation &sim, const std::vector<std::pair<int, int>> &cells) const;
 	void LevelLiquids(Simulation &sim);
 	struct PlaceTarget
@@ -161,6 +181,7 @@ private:
 		b2Vec2 pos;
 		b2Rot rot;
 		bool *stuck; // set if the body couldn't be placed
+		bool *byBodies; // and if only other rigid bodies were in its way
 	};
 	void Place(Simulation &sim);
 	void PlaceStep(Simulation &sim, const std::vector<PlaceTarget> &targets);

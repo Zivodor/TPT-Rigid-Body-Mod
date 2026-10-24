@@ -11,6 +11,7 @@ simulation_tool_names = [
 	'AMBP',
 	'WIND',
 	'PUSH',
+	'GRAB',
 ]
 
 simulation_tool_src = []

@@ -20,6 +20,7 @@ public:
 	void SetNewtonianGravity(bool state);
 	void SetWaterEqualisation(bool state);
 	void SetRigidLiquidLevelling(bool state);
+	void SetRigidAirResistance(bool state);
 	void SetGravityMode(int gravityMode);
 	void SetCustomGravityX(float x);
 	void SetCustomGravityY(float y);

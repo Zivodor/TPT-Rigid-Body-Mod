@@ -37,6 +37,11 @@ void OptionsController::SetWaterEqualisation(bool state)
 	model->SetWaterEqualisation(state);
 }
 
+void OptionsController::SetRigidLiquidLevelling(bool state)
+{
+	model->SetRigidLiquidLevelling(state);
+}
+
 void OptionsController::SetGravityMode(int gravityMode)
 {
 	model->SetGravityMode(gravityMode);

@@ -23,6 +23,8 @@ public:
 	void SetNewtonianGravity(bool state);
 	bool GetWaterEqualisation();
 	void SetWaterEqualisation(bool state);
+	bool GetRigidLiquidLevelling();
+	void SetRigidLiquidLevelling(bool state);
 	bool GetShowAvatars();
 	void SetShowAvatars(bool state);
 	int GetAirMode();

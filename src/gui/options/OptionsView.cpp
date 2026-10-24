@@ -249,6 +249,9 @@ OptionsView::OptionsView() : ui::Window(ui::Point(-1, -1), ui::Point(320, 340))
 	waterEqualisation = addCheckbox(0, "Water equalisation \bgIntroduced in version 61", "May cause poor performance with a lot of water", [this] {
 		c->SetWaterEqualisation(waterEqualisation->GetChecked());
 	});
+	rigidLiquidLevelling = addCheckbox(0, "Rigid body liquid levelling", "Liquid flows under floating rigid bodies", [this] {
+		c->SetRigidLiquidLevelling(rigidLiquidLevelling->GetChecked());
+	});
 	airMode = addDropDown("Air simulation mode", {
 		{ "On", AIR_ON },
 		{ "Pressure off", AIR_PRESSUREOFF },
@@ -756,6 +759,7 @@ void OptionsView::NotifySettingsChanged(OptionsModel * sender)
 	ambientHeatSimulation->SetChecked(sender->GetAmbientHeatSimulation());
 	newtonianGravity->SetChecked(sender->GetNewtonianGravity());
 	waterEqualisation->SetChecked(sender->GetWaterEqualisation());
+	rigidLiquidLevelling->SetChecked(sender->GetRigidLiquidLevelling());
 	airMode->SetOption(sender->GetAirMode());
 	// Initialize air temp and preview only when the options menu is opened, and not when user is actively editing the textbox
 	if (!ambientAirTemp->IsFocused())

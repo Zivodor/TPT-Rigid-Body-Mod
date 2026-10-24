@@ -3,6 +3,7 @@
 #include "simulation/Simulation.h"
 #include "simulation/Air.h"
 #include "simulation/gravity/Gravity.h"
+#include "simulation/RigidBodies.h"
 #include "prefs/GlobalPrefs.h"
 #include "common/clipboard/Clipboard.h"
 #include "gui/interface/Engine.h"
@@ -62,6 +63,17 @@ bool OptionsModel::GetWaterEqualisation()
 void OptionsModel::SetWaterEqualisation(bool state)
 {
 	sim->water_equal_test = state?1:0;
+	notifySettingsChanged();
+}
+
+bool OptionsModel::GetRigidLiquidLevelling()
+{
+	return sim->rigidBodies->levelLiquids;
+}
+
+void OptionsModel::SetRigidLiquidLevelling(bool state)
+{
+	sim->rigidBodies->levelLiquids = state;
 	notifySettingsChanged();
 }
 

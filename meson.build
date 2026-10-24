@@ -606,6 +606,30 @@ if get_option('build_render')
 	clang_tidy_sources += render_files
 endif
 
+if host_platform not in [ 'android', 'emscripten' ]
+	rigid_bodies_test = executable(
+		'rigid-bodies-test',
+		sources: files(
+			'src/RigidBodiesTest.cpp',
+			'src/client/GameSave.cpp',
+			'src/common/clipboard/Null.cpp',
+			'src/simulation/Editing.cpp',
+			'src/simulation/gravity/Null.cpp',
+		) + powder_graphics_files,
+		include_directories: project_inc,
+		cpp_args: project_cpp_args,
+		link_args: project_link_args,
+		dependencies: project_deps + [
+			threads_dep,
+			sta_libs['common'],
+			sta_libs['simulation'],
+		],
+		override_options: target_options,
+		build_by_default: false,
+	)
+	test('rigid-bodies', rigid_bodies_test, timeout: 600)
+endif
+
 if get_option('build_font')
 	if host_platform in [ 'android', 'emscripten' ]
 		error('font does not target @0@'.format(host_platform))

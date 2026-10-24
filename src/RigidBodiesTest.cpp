@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -1098,11 +1099,41 @@ namespace
 			rb.Push(*s.sim, cells(105, ground - 5), { 105, ground - 5 }, { 0.15f * 50, 0 });
 			rb.Push(*s.sim, cells(305, ground - 5), { 305, ground - 5 }, { 0.15f * 50, 0 });
 			rb.Poke(*s.sim, cells(451, ground - 5), { 451, ground - 5 }, 6.0f);
-			s.Run(60);
+			// Nothing jumps further in a frame than the speed limit allows.
+			auto last = std::array{ s.OfType(PT_RWOD).x0, s.OfType(PT_RGLD).x0, s.OfType(PT_RFOM).x0 };
+			int jump = 0;
+			for (int f = 0; f < 60; f++)
+			{
+				s.Run(1);
+				auto now = std::array{ s.OfType(PT_RWOD).x0, s.OfType(PT_RGLD).x0, s.OfType(PT_RFOM).x0 };
+				for (int i = 0; i < 3; i++)
+				{
+					jump = std::max(jump, std::abs(now[i] - last[i]));
+				}
+				last = now;
+			}
+			Expect(jump <= 11, "a body jumped " + std::to_string(jump) + " px in one frame");
 			auto movedWood = s.OfType(PT_RWOD).x0 - wood, movedGold = s.OfType(PT_RGLD).x0 - gold, movedFoam = s.OfType(PT_RFOM).x0 - foam;
 			auto report = "wood " + std::to_string(movedWood) + ", gold " + std::to_string(movedGold) + ", foam " + std::to_string(movedFoam) + " px";
 			Expect(movedWood > 10 && movedGold < movedWood / 4 && movedGold >= 0, "the push should move wood well and gold a little: " + report);
 			Expect(movedFoam > 10, "the poke should send the foam off to the right: " + report);
+		} },
+		{ "a hard PUSH doesn't make a body jump", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			s.Rigid(100, ground - 10, 10, 10, PT_RFOM);
+			s.Run(30);
+			// A 200 px line drawn from the middle of a block of foam.
+			std::vector<std::pair<int, int>> cells{ { 105, ground - 5 } };
+			s.sim->rigidBodies->Push(*s.sim, cells, { 105, ground - 5 }, { 0.15f * 200, 0 });
+			int last = s.OfType(PT_RFOM).x0, jump = 0;
+			for (int f = 0; f < 30; f++)
+			{
+				s.Run(1);
+				auto now = s.OfType(PT_RFOM).x0;
+				jump = std::max(jump, now - last);
+				last = now;
+			}
+			Expect(jump <= 11, "the foam jumped " + std::to_string(jump) + " px in one frame");
 		} },
 		{ "the PUSH tool shoves a big body as hard as a small one", [](Scene &s) {
 			s.Solid(20, ground, 590, ground + 5);

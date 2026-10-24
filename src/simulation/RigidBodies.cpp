@@ -380,6 +380,9 @@ RigidBodies::RigidBodies() : lastState(NPART, noParticle), partBody(NPART, 0), p
 	// pixels can only follow it there by overlapping the other body's.
 	// Box2D allows up to an eighth of the substep rate.
 	worldDef.contactHertz = 0.125f * frameRate * subSteps;
+	// Box2D's own speed limit, so that nothing (a hard push, say) carries a
+	// body further than that in one step before it's slowed down.
+	worldDef.maximumLinearSpeed = maxSpeed;
 	world = b2CreateWorld(&worldDef);
 	auto terrainDef = b2DefaultBodyDef();
 	terrain = b2CreateBody(world, &terrainDef);

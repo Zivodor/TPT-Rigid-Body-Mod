@@ -147,6 +147,68 @@ namespace
 			}
 		}
 
+		// A hollow ball, maybe squashed: an elliptical ring of the given
+		// material and wall thickness, with the hollow filled with water from
+		// `waterTop` down. Returns how much water went in.
+		int Ring(int cx, int cy, int rx, int ry, int wall, int type, int waterTop)
+		{
+			auto within = [&](int x, int y, float a, float b) {
+				return (x - cx) * (x - cx) / (a * a) + (y - cy) * (y - cy) / (b * b) <= 1.0f;
+			};
+			int water = 0;
+			for (int y = cy - ry; y <= cy + ry; y++)
+			{
+				for (int x = cx - rx; x <= cx + rx; x++)
+				{
+					if (within(x, y, rx - wall, ry - wall))
+					{
+						if (y >= waterTop)
+						{
+							water += sim->create_part(-1, x, y, PT_WATR) >= 0;
+						}
+					}
+					else if (within(x, y, rx, ry))
+					{
+						sim->create_part(-1, x, y, type);
+					}
+				}
+			}
+			return water;
+		}
+
+		// Particles of a type that can be reached from the top left corner
+		// without passing through anything rigid or solid: outside every
+		// closed hollow.
+		int OutsideOf(int type) const
+		{
+			std::vector<char> seen(XRES * YRES, 0);
+			std::vector<int> queue{ CELL * XRES + CELL };
+			seen[queue[0]] = 1;
+			int n = 0;
+			for (size_t head = 0; head < queue.size(); head++)
+			{
+				auto x = queue[head] % XRES, y = queue[head] / XRES;
+				auto r = sim->pmap[y][x];
+				n += r && TYP(r) == type;
+				for (auto [dx, dy] : { std::pair(0, -1), { -1, 0 }, { 1, 0 }, { 0, 1 } })
+				{
+					auto nx = x + dx, ny = y + dy;
+					if (nx < 0 || nx >= XRES || ny < 0 || ny >= YRES || seen[ny * XRES + nx])
+					{
+						continue;
+					}
+					auto q = sim->pmap[ny][nx];
+					if (q && !(SimulationData::CRef().elements[TYP(q)].Properties & (TYPE_LIQUID | TYPE_GAS)))
+					{
+						continue;
+					}
+					seen[ny * XRES + nx] = 1;
+					queue.push_back(ny * XRES + nx);
+				}
+			}
+			return n;
+		}
+
 		int Count() const
 		{
 			int n = 0;
@@ -237,6 +299,27 @@ namespace
 				{
 					continue;
 				}
+				b.x0 = std::min(b.x0, x);
+				b.y0 = std::min(b.y0, y);
+				b.x1 = std::max(b.x1, x);
+				b.y1 = std::max(b.y1, y);
+				b.count++;
+			}
+			return b;
+		}
+
+		// Bounds of all the particles of one type.
+		Bounds OfType(int type) const
+		{
+			Bounds b;
+			for (int i = 0; i < sim->parts.active; i++)
+			{
+				auto &part = sim->parts[i];
+				if (part.type != type)
+				{
+					continue;
+				}
+				auto x = int(part.x + 0.5f), y = int(part.y + 0.5f);
 				b.x0 = std::min(b.x0, x);
 				b.y0 = std::min(b.y0, y);
 				b.x1 = std::max(b.x1, x);
@@ -847,6 +930,194 @@ namespace
 			Expect(inside == 0, std::to_string(inside) + " water particles got inside");
 			Expect(b.y1 < 320, "the box sank: " + Describe(b));
 		} },
+		{ "water inside a bouncing rubber ball stays inside", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			for (int x = 330; x <= 480; x++)
+			{
+				s.Solid(x, ground - (480 - x), x, ground - 1);
+			}
+			// Hollow balls with 7 px walls, partly filled: one bounces on the
+			// floor, one lands on the top of a slope and rolls down it.
+			auto water = s.Ring(150, 120, 24, 24, 7, PT_RRBR, 122);
+			water += s.Ring(345, 80, 24, 24, 7, PT_RRBR, 122 - 40);
+			int worst = 0, when = -1;
+			for (int f = 0; f < 600; f++)
+			{
+				s.Run(1);
+				auto out = s.OutsideOf(PT_WATR);
+				if (out > worst)
+				{
+					worst = out;
+					when = f;
+				}
+			}
+			Expect(worst == 0, std::to_string(worst) + " water particles got out (by frame " + std::to_string(when) + ")");
+			Expect(s.CountOf(PT_WATR) == water, "water went from " + std::to_string(water) + " to " + std::to_string(s.CountOf(PT_WATR)));
+		} },
+		{ "a rubber ball filled to the brim with water doesn't leak", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			// Like one drawn in the game: wider than it's tall, 7 px walls.
+			auto water = s.Ring(250, 110, 60, 50, 7, PT_RRBR, 0);
+			auto rubber = s.Count();
+			int worst = 0, when = -1;
+			for (int f = 0; f < 600; f++)
+			{
+				s.Run(1);
+				auto out = s.OutsideOf(PT_WATR);
+				if (out > worst)
+				{
+					worst = out;
+					when = f;
+				}
+			}
+			Expect(worst == 0, std::to_string(worst) + " water particles got out (by frame " + std::to_string(when) + ")");
+			Expect(s.CountOf(PT_WATR) == water, "water went from " + std::to_string(water) + " to " + std::to_string(s.CountOf(PT_WATR)));
+			Expect(s.Count() == rubber, "rubber went from " + std::to_string(rubber) + " to " + std::to_string(s.Count()));
+		} },
+		{ "a water-filled rubber ball dropped in a pool keeps its own water", [](Scene &s) {
+			s.Tank(150, 450, 330, 50, PT_WATR);
+			auto pool = s.CountOf(PT_WATR);
+			auto water = s.Ring(300, 150, 24, 24, 7, PT_RRBR, 152);
+			int worst = 0, when = -1;
+			for (int f = 0; f < 600; f++)
+			{
+				s.Run(1);
+				auto out = s.OutsideOf(PT_WATR);
+				auto change = std::abs(out - pool);
+				if (change > worst)
+				{
+					worst = change;
+					when = f;
+				}
+			}
+			Expect(worst == 0, std::to_string(worst) + " water particles went between the pool and the ball (by frame " + std::to_string(when) + ")");
+			Expect(s.CountOf(PT_WATR) == pool + water, "water went from " + std::to_string(pool + water) + " to " + std::to_string(s.CountOf(PT_WATR)));
+		} },
+		{ "wind blows foam and wood along, but not stone or gold", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			int types[] = { PT_RFOM, PT_RWOD, PT_RSTN, PT_RGLD };
+			// Heaviest upwind, so nothing is blown into anything else.
+			for (int i = 0; i < 4; i++)
+			{
+				s.Rigid(240 - 60 * i, ground - 12, 12, 12, types[i]);
+			}
+			s.Run(30);
+			int before[4];
+			for (int i = 0; i < 4; i++)
+			{
+				before[i] = s.OfType(types[i]).x0;
+			}
+			// A steady wind to the right, like from a fan, for two thirds of a
+			// second (any longer and foam and wood reach the edge).
+			for (int f = 0; f < 40; f++)
+			{
+				for (int y = 0; y < YCELLS; y++)
+				{
+					for (int x = 0; x < XCELLS; x++)
+					{
+						s.sim->vx[y][x] = 2.0f;
+						s.sim->vy[y][x] = 0.0f;
+					}
+				}
+				s.Run(1);
+			}
+			int moved[4];
+			for (int i = 0; i < 4; i++)
+			{
+				auto b = s.OfType(types[i]);
+				moved[i] = b.x0 - before[i];
+			}
+			auto report = "foam " + std::to_string(moved[0]) + ", wood " + std::to_string(moved[1]) + ", stone " + std::to_string(moved[2]) + ", gold " + std::to_string(moved[3]) + " px";
+			Expect(moved[0] > moved[1] && moved[1] > 10, "foam should go furthest and wood should go too: " + report);
+			Expect(std::abs(moved[2]) <= 2 && std::abs(moved[3]) <= 2, "stone and gold should stay put: " + report);
+		} },
+		{ "a pressure blast pushes light bodies further than heavy ones", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			int types[] = { PT_RFOM, PT_RWOD, PT_RSTN, PT_RGLD };
+			for (int i = 0; i < 4; i++)
+			{
+				s.Rigid(60 + 120 * i, ground - 12, 12, 12, types[i]);
+			}
+			s.Run(30);
+			int before[4];
+			for (int i = 0; i < 4; i++)
+			{
+				before[i] = s.OfType(types[i]).x0;
+			}
+			// High pressure just left of each block for a few frames.
+			for (int f = 0; f < 5; f++)
+			{
+				for (int i = 0; i < 4; i++)
+				{
+					for (int y = (ground - 20) / CELL; y < ground / CELL; y++)
+					{
+						for (int x = (before[i] - 8) / CELL; x < before[i] / CELL; x++)
+						{
+							s.sim->pv[y][x] = 100.0f;
+						}
+					}
+				}
+				s.Run(1);
+			}
+			// How far each gets: still air slows light bodies down soonest, so
+			// later on a light body may have come back down the slope of its
+			// own bounce, or the rest may have caught up.
+			int moved[4] = { 0, 0, 0, 0 };
+			for (int f = 0; f < 60; f++)
+			{
+				s.Run(1);
+				for (int i = 0; i < 4; i++)
+				{
+					moved[i] = std::max(moved[i], s.OfType(types[i]).x0 - before[i]);
+				}
+			}
+			auto report = "foam " + std::to_string(moved[0]) + ", wood " + std::to_string(moved[1]) + ", stone " + std::to_string(moved[2]) + ", gold " + std::to_string(moved[3]) + " px";
+			Expect(moved[0] > moved[1] && moved[1] > moved[2] && moved[2] >= moved[3] && moved[0] > 10, "lighter should go further: " + report);
+		} },
+		{ "the PUSH tool shoves light bodies further than heavy ones", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			s.Rigid(100, ground - 10, 10, 10, PT_RWOD);
+			s.Rigid(300, ground - 10, 10, 10, PT_RGLD);
+			s.Rigid(450, ground - 10, 10, 10, PT_RFOM);
+			s.Run(30);
+			auto wood = s.OfType(PT_RWOD).x0, gold = s.OfType(PT_RGLD).x0, foam = s.OfType(PT_RFOM).x0;
+			auto cells = [](int x, int y) {
+				std::vector<std::pair<int, int>> cells;
+				for (int dy = -2; dy <= 2; dy++)
+				{
+					for (int dx = -2; dx <= 2; dx++)
+					{
+						cells.emplace_back(x + dx, y + dy);
+					}
+				}
+				return cells;
+			};
+			// A line drawn 50 px to the right from the middle of each of the
+			// wood and the gold, and a click on the left side of the foam.
+			auto &rb = *s.sim->rigidBodies;
+			rb.Push(*s.sim, cells(105, ground - 5), { 105, ground - 5 }, { 0.15f * 50, 0 });
+			rb.Push(*s.sim, cells(305, ground - 5), { 305, ground - 5 }, { 0.15f * 50, 0 });
+			rb.Poke(*s.sim, cells(451, ground - 5), { 451, ground - 5 }, 6.0f);
+			s.Run(60);
+			auto movedWood = s.OfType(PT_RWOD).x0 - wood, movedGold = s.OfType(PT_RGLD).x0 - gold, movedFoam = s.OfType(PT_RFOM).x0 - foam;
+			auto report = "wood " + std::to_string(movedWood) + ", gold " + std::to_string(movedGold) + ", foam " + std::to_string(movedFoam) + " px";
+			Expect(movedWood > 10 && movedGold < movedWood / 4 && movedGold >= 0, "the push should move wood well and gold a little: " + report);
+			Expect(movedFoam > 10, "the poke should send the foam off to the right: " + report);
+		} },
+		{ "the PUSH tool shoves a big body as hard as a small one", [](Scene &s) {
+			s.Solid(20, ground, 590, ground + 5);
+			s.Rigid(100, ground - 40, 80, 40, PT_RRBR);
+			s.Rigid(400, ground - 10, 10, 10, PT_RRBR);
+			s.Run(30);
+			auto big = s.Of(0, 0, 300, YRES).x0, small = s.Of(300, 0, XRES, YRES).x0;
+			// A click on each, from the left, level with its middle.
+			std::vector<std::pair<int, int>> bigCells{ { 101, ground - 20 } }, smallCells{ { 401, ground - 5 } };
+			s.sim->rigidBodies->Poke(*s.sim, bigCells, { 101, ground - 20 }, 6.0f);
+			s.sim->rigidBodies->Poke(*s.sim, smallCells, { 401, ground - 5 }, 6.0f);
+			s.Run(30);
+			auto movedBig = s.Of(0, 0, 300, YRES).x0 - big, movedSmall = s.Of(300, 0, XRES, YRES).x0 - small;
+			Expect(movedBig > 20 && movedBig * 2 > movedSmall, "big moved " + std::to_string(movedBig) + " px, small " + std::to_string(movedSmall) + " px");
+		} },
 		{ "a lone pixel falls like powder instead of being a body", [](Scene &s) {
 			s.Solid(20, ground, 590, ground + 5);
 			s.sim->create_part(-1, 200, 100, PT_RIGD);
@@ -1356,6 +1627,11 @@ int main(int argc, char *argv[])
 		catch (const std::string &message)
 		{
 			error = message;
+		}
+		// Particles are only ever moved aside, never removed.
+		if (error.empty() && scene.sim->rigidBodies->timings.fluidLost)
+		{
+			error = std::to_string(scene.sim->rigidBodies->timings.fluidLost) + " liquid or gas particles were removed";
 		}
 		auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 		printf("%-55s %s (%.1fs)\n", scenario.name, error.empty() ? "ok" : ("FAIL: " + error).c_str(), seconds);

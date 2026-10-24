@@ -533,7 +533,7 @@ void GameView::NotifyLastToolChanged(GameModel * sender)
 	if (sender->GetLastTool())
 	{
 		wallBrush = sender->GetLastTool()->Blocky;
-		toolBrush = sender->GetLastTool()->Identifier.BeginsWith("DEFAULT_TOOL_");
+		toolBrush = sender->GetLastTool()->Identifier.BeginsWith("DEFAULT_TOOL_") || sender->GetLastTool()->Identifier.BeginsWith("RIGID_BODIES_TOOL_");
 	}
 }
 

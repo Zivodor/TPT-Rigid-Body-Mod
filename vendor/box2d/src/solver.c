@@ -22,6 +22,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+// Rigid Body Mod: how many times restitution is applied each step (see
+// b2SolverTask).
+#define B2_RESTITUTION_ITERATIONS 10
+
 // todo testing
 #define ITERATIONS 1
 #define RELAX_ITERATIONS 1
@@ -1073,6 +1077,12 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		stageIndex += 1 + activeColorCount + ITERATIONS * activeColorCount + 1 + RELAX_ITERATIONS * activeColorCount;
 
 		// Restitution
+		// Rigid Body Mod: applied several times over, like the relax
+		// iterations above. Once (as in Box2D itself), a body landing flat on
+		// two contact points, or on two shapes, bounces back faster than its
+		// restitution allows, since each point's correction disturbs the
+		// others; iterating settles them all on the right speed.
+		for ( int i = 0; i < B2_RESTITUTION_ITERATIONS; ++i )
 		{
 			b2ApplyOverflowRestitution( context );
 
@@ -1084,9 +1094,9 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 				b2ExecuteMainStage( stages + iterStageIndex, context, syncBits );
 				iterStageIndex += 1;
 			}
-			// graphSyncIndex += 1;
-			stageIndex += activeColorCount;
+			graphSyncIndex += 1;
 		}
+		stageIndex += activeColorCount;
 
 		profile->applyRestitution += b2GetMillisecondsAndReset( &ticks );
 

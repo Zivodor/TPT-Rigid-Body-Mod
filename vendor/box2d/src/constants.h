@@ -35,13 +35,19 @@ extern float b2_lengthUnitsPerMeter;
 // Box2D uses limited speculative collision. This reduces jitter.
 // Normally this is 2cm.
 // @warning modifying this can have a significant impact on performance and stability
-#define B2_SPECULATIVE_DISTANCE ( 4.0f * B2_LINEAR_SLOP )
+// Rigid Body Mod: 4 pixels (0.4 m at 10 pixels a metre) instead of 0.2. Bodies
+// here move up to 10 pixels a step, so with the default a fast one could get
+// most of the way into a small one before they had a contact at all; then
+// the small one was pushed out sideways, or not at all.
+#define B2_SPECULATIVE_DISTANCE ( 0.4f * b2_lengthUnitsPerMeter )
 
 // This is used to fatten AABBs in the dynamic tree. This allows proxies
 // to move by a small amount without triggering a tree adjustment. This is in meters.
 // Normally this is 5cm.
 // @warning modifying this can have a significant impact on performance
-#define B2_AABB_MARGIN ( 0.05f * b2_lengthUnitsPerMeter )
+// Rigid Body Mod: as big as the speculative distance, so that bodies that
+// close are paired up to have a contact.
+#define B2_AABB_MARGIN ( 0.4f * b2_lengthUnitsPerMeter )
 
 // The time that a body must be still before it will go to sleep. In seconds.
 #define B2_TIME_TO_SLEEP 0.5f

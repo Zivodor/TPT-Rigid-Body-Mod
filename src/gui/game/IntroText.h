@@ -67,6 +67,9 @@ inline ByteString IntroText()
 	      "Use \bo'H'\bg to toggle the HUD. Use \bo'D'\bg to toggle debug mode in the HUD.\n"
 	      "Use \bo'Z'\bg for a zoom tool. Click to make the drawable zoom window stay around. Use the wheel to change the zoom strength.\n"
 	      "Use \boCtrl+F\bg to highlight a selected element on the screen.\n"
+	      "\n"
+	      "\bgRigid Body Mod: the rigid materials (RIGD, RWOD, RRBR, RICE, RSTN, RFOM, RGLD) are in the Solids menu.\n"
+	      "Rigid body physics by Box2D, Copyright (c) 2022 Erin Catto, MIT license: https://box2d.org\n"
 	      "\n";
 	if constexpr (BETA)
 	{

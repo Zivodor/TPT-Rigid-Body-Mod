@@ -175,25 +175,25 @@ option(
 option(
 	'app_name',
 	type: 'string',
-	value: 'The Powder Toy',
+	value: 'Rigid Body Mod',
 	description: 'App name, used for desktop integration and the window title, change if you work on a mod'
 )
 option(
 	'app_comment',
 	type: 'string',
-	value: 'Physics sandbox game',
+	value: 'Physics sandbox game, with rigid bodies',
 	description: 'App comment, used for desktop integration, change if you work on a mod'
 )
 option(
 	'app_exe',
 	type: 'string',
-	value: 'powder',
+	value: 'rigidbodymod',
 	description: 'App executable name, used for desktop integration, change if you work on a mod'
 )
 option(
 	'app_id',
 	type: 'string',
-	value: 'uk.co.powdertoy.tpt',
+	value: 'io.github.zivodor.rigidbodymod',
 	description: 'App ID, a D-Bus well-known name, used for desktop integration, change if you work on a mod'
 )
 option(

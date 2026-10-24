@@ -1109,14 +1109,12 @@ namespace
 				}
 			}
 			auto all = s.Of(150, 100, 450, 330);
-			auto wood = 0;
 			int wx0 = XRES, wx1 = -1;
 			for (int i = 0; i < s.sim->parts.active; i++)
 			{
 				auto &part = s.sim->parts[i];
 				if (part.type == PT_RWOD)
 				{
-					wood++;
 					wx0 = std::min(wx0, int(part.x));
 					wx1 = std::max(wx1, int(part.x));
 				}

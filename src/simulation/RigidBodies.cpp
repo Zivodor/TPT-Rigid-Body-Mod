@@ -162,7 +162,7 @@ namespace
 	// or as it is if it's too thin for that.
 	b2Polygon Rounded(const b2Polygon &sharp)
 	{
-		b2Vec2 inset[B2_MAX_POLYGON_VERTICES];
+		b2Vec2 inset[B2_MAX_POLYGON_VERTICES] = {};
 		auto n = sharp.count;
 		for (int i = 0; i < n; i++)
 		{
@@ -351,7 +351,7 @@ namespace
 	}
 }
 
-RigidBodies::RigidBodies() : partBody(NPART, 0), partIndex(NPART, -1), lastState(NPART, noParticle), claimStamp(XRES * YRES, 0), claimBody(XRES * YRES, 0), visited(XRES * YRES, 0)
+RigidBodies::RigidBodies() : lastState(NPART, noParticle), partBody(NPART, 0), partIndex(NPART, -1), claimStamp(XRES * YRES, 0), claimBody(XRES * YRES, 0), visited(XRES * YRES, 0)
 {
 	// Box2D is tuned for bodies about 0.1 to 10 units across. With this, one
 	// unit is one pixel and a 10 pixel body counts as a metre.

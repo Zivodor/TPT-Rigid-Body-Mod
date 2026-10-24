@@ -8,6 +8,11 @@ box2d_c_std = meson.get_compiler('c').get_id() in [ 'msvc', 'clang-cl' ] ? 'c17'
 if host_platform == 'emscripten' or not (is_x86 or host_arch == 'aarch64')
 	box2d_c_args += [ '-DBOX2D_DISABLE_SIMD' ]
 endif
+# Box2D's x86 SIMD code needs SSE2, which TPT's oldest Windows XP build (x86_sse=none) doesn't have.
+c_compiler = meson.get_compiler('c')
+if is_x86 and c_compiler.get_argument_syntax() != 'msvc' and c_compiler.get_define('__SSE2__') == ''
+	box2d_c_args += [ '-DBOX2D_DISABLE_SIMD' ]
+endif
 
 box2d_dep = declare_dependency(
 	include_directories: include_directories('include', is_system: true),
@@ -52,7 +57,9 @@ box2d_dep = declare_dependency(
 		),
 		include_directories: include_directories('include', 'src'),
 		c_args: box2d_c_args,
-		override_options: [ 'c_std=' + box2d_c_std, 'warning_level=0' ],
+		# TPT's target_options carry settings every library must share, such as the C runtime
+		# (b_vscrt) for static MSVC builds.
+		override_options: target_options + [ 'c_std=' + box2d_c_std, 'warning_level=0' ],
 		pic: host_platform == 'android',
 	),
 )

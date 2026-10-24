@@ -1,7 +1,7 @@
-Rigid Body Mod for The Powder Toy - v0.0.2
+Rigid Body Mod for The Powder Toy - v0.0.3
 ==========================================
 
-**AI disclosure: the code in this mod (everything that isn't The Powder Toy itself or Box2D) was written with an AI assistant, Claude by Anthropic, under the direction of the mod's author.**
+**AI disclosure: the code in this mod (everything that isn't The Powder Toy itself or Box2D, plus the small changes to Box2D listed in [vendor/box2d/MODIFICATIONS.md](vendor/box2d/MODIFICATIONS.md)) was written with an AI assistant, Claude by Anthropic, under the direction of the mod's author.**
 
 This is a mod of [The Powder Toy](https://powdertoy.co.uk) that adds rigid bodies: solids that move as one piece. Draw a box of RIGD and it falls, lands, tips over edges, slides down slopes, stacks and rolls, keeping its shape. Bodies float or sink in liquids according to their density.
 
@@ -21,6 +21,8 @@ All are in the Solids menu. Densities are relative to water (1.0); liquids use r
 | RSTN | Stone  | 2.6  | Rough. Sinks in water, floats on lava and mercury. Melts into lava. |
 | RFOM | Foam   | 0.1  | Rides high on any liquid. Burns. |
 | RGLD | Gold   | 19.3 | Sinks even in mercury. Conducts. |
+| ELAS | Elastic | 1.1 | Perfectly elastic: bounces back as high as it fell, forever (turn off air resistance in Simulation Options for that). Grippy like rubber. |
+| PELA | Perfect elastic | 1.1 | Perfectly elastic and frictionless: bounces back as high as it fell and slides without ever slowing down. |
 
 How it works
 ------------
@@ -30,8 +32,10 @@ How it works
 * Hollow bodies hold liquid: water inside a ball stays inside as it bounces and rolls, and the liquid around a body stays out. Liquid a body moves into is pushed aside, never deleted; if a hollow is full to the brim, the body bulges by a pixel instead.
 * Air pushes bodies too: wind and pressure differences (from fans, explosions, the AIR tool...) blow light bodies about and barely move heavy ones. Foam is blown away; gold hardly notices.
 * The PUSH tool in the Tools menu shoves bodies: click to shove them away from the cursor, or draw a line with the line tool (shift) to push along it, harder the longer it is. Big bodies get as big a shove as small ones; dense ones move less.
+* The GRAB tool in the Tools menu picks bodies up: click on one and drag it around (it still bumps into things on the way), and let go to throw it. It only moves bodies while the simulation is running.
 * A single pixel of rigid material isn't a body: it falls like powder. Molten rigid material is ordinary lava, and turns back into a rigid body when it sets.
 * *Simulation Options > Rigid body liquid levelling* moves liquid under floating bodies so levels even out (TPT's liquids have no pressure of their own).
+* *Simulation Options > Rigid body air resistance* switches off still air slowing moving bodies; wind and pressure still push them.
 
 Known limitations
 -----------------
@@ -39,11 +43,12 @@ Known limitations
 * Powders are treated as solid ground: bodies rest on sand rather than sinking into it.
 * Body velocities aren't saved; after loading a save, bodies start at rest (with their shapes intact).
 * Rigid bodies packed tightly inside another body can lag slightly behind it while both are moving.
+* With looping edges, a body partway across an edge only feels walls and other bodies on the side its middle is on, and floats on nothing until it's fully back on screen.
 
 Building and testing
 --------------------
 
-Build as you would The Powder Toy (see the build instructions below); Box2D is included in `vendor/box2d`. The rigid body code is in `src/simulation/RigidBodies.cpp`. Headless tests:
+Build as you would The Powder Toy (see the build instructions below); Box2D is included in `vendor/box2d`, with a few small changes (see `vendor/box2d/MODIFICATIONS.md`). The rigid body code is in `src/simulation/RigidBodies.cpp`. Headless tests:
 
 ```
 meson setup build-release --buildtype=release
@@ -106,7 +111,7 @@ Libraries and other assets used
 * [Mallangche](https://github.com/JammPark/Mallangche)
 * [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls/)
 * [SDL](https://libsdl.org/)
-* [Box2D](https://box2d.org) (Rigid Body Mod only; MIT license, Copyright (c) 2022 Erin Catto, see [vendor/box2d/LICENSE](vendor/box2d/LICENSE))
+* [Box2D](https://box2d.org) (Rigid Body Mod only; MIT license, Copyright (c) 2022 Erin Catto, see [vendor/box2d/LICENSE](vendor/box2d/LICENSE); changes in [vendor/box2d/MODIFICATIONS.md](vendor/box2d/MODIFICATIONS.md))
 
 Instructions
 ===========================================================================

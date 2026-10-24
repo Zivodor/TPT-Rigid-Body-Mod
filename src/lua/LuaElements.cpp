@@ -728,7 +728,7 @@ static int ffree(lua_State *L)
 		}
 
 		identifier = sd.elements[id].Identifier;
-		if (identifier.BeginsWith("DEFAULT_PT_"))
+		if (identifier.BeginsWith("DEFAULT_PT_") || identifier.BeginsWith("RIGID_BODIES_PT_"))
 		{
 			return luaL_error(L, "Cannot free default elements");
 		}

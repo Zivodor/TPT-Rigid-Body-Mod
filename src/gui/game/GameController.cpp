@@ -937,7 +937,7 @@ void GameController::Update()
 	{
 		int rightSelected = PT_DUST;
 		Tool * activeTool = gameModel->GetActiveTool(1);
-		if (activeTool->Identifier.BeginsWith("DEFAULT_PT_"))
+		if (activeTool->Identifier.BeginsWith("DEFAULT_PT_") || activeTool->Identifier.BeginsWith("RIGID_BODIES_PT_"))
 		{
 			int sr = activeTool->ToolID;
 			if (sr && sd.IsElementOrNone(sr))

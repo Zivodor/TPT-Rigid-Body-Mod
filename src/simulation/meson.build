@@ -5,6 +5,7 @@ simulation_files = files(
 	'ElementClasses.cpp',
 	'GOLString.cpp',
 	'Particle.cpp',
+	'RigidBodies.cpp',
 	'SaveRenderer.cpp',
 	'Sign.cpp',
 	'SimulationData.cpp',

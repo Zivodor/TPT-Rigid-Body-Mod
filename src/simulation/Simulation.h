@@ -34,6 +34,7 @@ class Simulation;
 class Renderer;
 class Air;
 class GameSave;
+class RigidBodies;
 
 class Parts
 {
@@ -120,6 +121,7 @@ class Simulation : public RenderableSimulation
 public:
 	GravityPtr grav;
 	std::unique_ptr<Air> air;
+	std::unique_ptr<RigidBodies> rigidBodies;
 
 	RNG rng;
 

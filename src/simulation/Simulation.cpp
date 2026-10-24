@@ -3,6 +3,7 @@
 #include "ElementClasses.h"
 #include "TransitionConstants.h"
 #include "gravity/Gravity.h"
+#include "RigidBodies.h"
 #include "ToolClasses.h"
 #include "SimulationData.h"
 #include "client/GameSave.h"
@@ -1065,6 +1066,10 @@ void Simulation::clear_sim(void)
 	//if(gravmask)
 		//memset(gravmask, 0xFFFFFFFF, NCELL*sizeof(unsigned));
 	ResetNewtonianGravity({}, {});
+	if (rigidBodies)
+	{
+		rigidBodies->Clear();
+	}
 	if(air)
 	{
 		air->Clear();
@@ -3913,6 +3918,11 @@ void Simulation::BeforeSim(bool willUpdate)
 		if (!player2.spwn && player2.spawnID >= 0)
 			create_part(-1, (int)parts[player2.spawnID].x, (int)parts[player2.spawnID].y, PT_STKM2);
 
+		{
+			FrameTime::Span span(frameTime, "RigidBodies::Update");
+			rigidBodies->Update(*this);
+		}
+
 		// particle update happens right after this function (called separately)
 	}
 }
@@ -3940,6 +3950,7 @@ Simulation::Simulation()
 
 	//Create and attach air simulation
 	air = std::make_unique<Air>(*this);
+	rigidBodies = std::make_unique<RigidBodies>();
 
 	player.comm = 0;
 	player2.comm = 0;

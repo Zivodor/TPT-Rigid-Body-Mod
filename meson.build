@@ -453,6 +453,7 @@ project_export_dynamic = false
 
 embedded_files = []
 
+subdir('vendor/box2d')
 subdir('src')
 subdir('resources')
 
@@ -516,6 +517,7 @@ foreach sta_info : [
 	[ 'simulation', simulation_files, [
 		json_dep,
 		threads_dep,
+		box2d_dep,
 	] ],
 ]
 	sta_name = sta_info[0]

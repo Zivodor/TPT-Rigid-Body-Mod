@@ -195,6 +195,13 @@ simulation_elem_names = [
 	'RSSS',
 	'BASE',
 	'SEED',
+	'RIGD',
+	'RWOD',
+	'RRBR',
+	'RICE',
+	'RSTN',
+	'RFOM',
+	'RGLD',
 ]
 
 simulation_elem_src = []

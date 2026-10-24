@@ -197,7 +197,7 @@ void ElementSearchActivity::SetActiveTool(int selectionState, Tool * tool)
 		gameController->RebuildFavoritesMenu();
 	}
 	else if (ctrlPressed && altPressed && !shiftPressed &&
-	         tool->Identifier.BeginsWith("DEFAULT_PT_"))
+	         (tool->Identifier.BeginsWith("DEFAULT_PT_") || tool->Identifier.BeginsWith("RIGID_BODIES_PT_")))
 	{
 		gameController->SetActiveTool(3, tool);
 	}

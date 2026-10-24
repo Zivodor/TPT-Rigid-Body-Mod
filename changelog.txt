@@ -1,9 +1,8 @@
 # This file is used by the starcatcher.us update server to pull changelogs for mod releases
 # Erase and replace the changelog for every release, do not just append changes to the end
 # Lines starting with # and empty lines are ignored
-Rigid Body Mod 0.0.1, first release.
-Seven rigid materials in the Solids menu: RIGD (iron), RWOD (wood), RRBR (rubber), RICE (ice), RSTN (stone), RFOM (foam) and RGLD (gold).
-Connected pixels of one material move as a single solid body: they fall, tip over, slide, bounce, stack and roll, simulated with Box2D.
-Bodies float or sink in liquids by density, push liquid aside, and feel drag; hollow bodies trap air and float like boats.
-Single pixels fall like powder. Molten rigid material is ordinary lava and turns back into a body when it sets.
-Simulation Options has a switch for levelling liquid across floating bodies.
+Rigid Body Mod 0.0.2
+Hollow bodies hold liquid: water inside a ball no longer leaks out as it bounces and rolls, even filled to the brim, and liquid around a body no longer gets in.
+Liquid a body moves into is only ever pushed aside, never deleted; a body bulges by a pixel for a moment instead when there's no room.
+Wind and air pressure now push rigid bodies, light ones (foam, wood) much more than heavy ones (stone, gold). Light bodies also fall more slowly through still air.
+New PUSH tool in the Tools menu: click to shove rigid bodies, or draw a line (shift) to push along it, harder the longer it is.

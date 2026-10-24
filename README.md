@@ -1,4 +1,4 @@
-Rigid Body Mod for The Powder Toy - v0.0.1
+Rigid Body Mod for The Powder Toy - v0.0.2
 ==========================================
 
 **AI disclosure: the code in this mod (everything that isn't The Powder Toy itself or Box2D) was written with an AI assistant, Claude by Anthropic, under the direction of the mod's author.**
@@ -27,6 +27,9 @@ How it works
 
 * Touching pixels of the same material form one body; different materials stay separate bodies. Pixels drawn onto a body join it, and cutting or melting a body splits it.
 * Bodies are simulated with [Box2D](https://box2d.org) and drawn back onto the pixel grid every frame. Walls and other solids are obstacles; liquids and gases are pushed aside, with buoyancy and drag.
+* Hollow bodies hold liquid: water inside a ball stays inside as it bounces and rolls, and the liquid around a body stays out. Liquid a body moves into is pushed aside, never deleted; if a hollow is full to the brim, the body bulges by a pixel instead.
+* Air pushes bodies too: wind and pressure differences (from fans, explosions, the AIR tool...) blow light bodies about and barely move heavy ones. Foam is blown away; gold hardly notices.
+* The PUSH tool in the Tools menu shoves bodies: click to shove them away from the cursor, or draw a line with the line tool (shift) to push along it, harder the longer it is. Big bodies get as big a shove as small ones; dense ones move less.
 * A single pixel of rigid material isn't a body: it falls like powder. Molten rigid material is ordinary lava, and turns back into a rigid body when it sets.
 * *Simulation Options > Rigid body liquid levelling* moves liquid under floating bodies so levels even out (TPT's liquids have no pressure of their own).
 
